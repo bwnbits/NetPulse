@@ -74,4 +74,6 @@ If you like this project, give it a ⭐ on GitHub!
 
 ---
 
-## 🖥️ Preview
+## 🖥️ Preview<img width="350" height="365" alt="Screenshot 2026-03-29 at 6 43 54 PM" src="https://github.com/user-attachments/assets/c51e8428-088e-41ff-b6a8-681210f806f7" />
+
+

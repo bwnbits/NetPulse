@@ -1,9 +1,3 @@
-//
-//  NetworkSpeedMonitor.swift
-//  NetPulse
-//
-//  Created by Abhishek Ruhela on 3/29/26.
-//
 import Foundation
 import Combine
 
@@ -20,8 +14,13 @@ class NetworkSpeedMonitor: ObservableObject {
     private var lastSent: UInt64 = 0
     private var timer: Timer?
     
-    // ✅ SINGLE INIT (fixed)
+    // MARK: - INIT (Load saved data)
+    
     init() {
+        // ✅ Load saved totals
+        totalDownload = UserDefaults.standard.double(forKey: "totalDownload")
+        totalUpload = UserDefaults.standard.double(forKey: "totalUpload")
+        
         initializeBaseline()
         startMonitoring()
     }
@@ -53,18 +52,22 @@ class NetworkSpeedMonitor: ObservableObject {
         
         DispatchQueue.main.async {
             
-            // Speed in MB/s
+            // Speed (MB/s)
             let downMB = Double(down) / (1024.0 * 1024.0)
             let upMB = Double(up) / (1024.0 * 1024.0)
             
             self.downloadSpeed = downMB
             self.uploadSpeed = upMB
             
-            // ✅ FIXED TOTALS (convert bytes → KB and accumulate)
+            // ✅ Accumulate totals (KB)
             self.totalDownload += Double(down) / 1024.0
             self.totalUpload += Double(up) / 1024.0
             
-            // ✅ Better detection
+            // ✅ SAVE (critical fix)
+            UserDefaults.standard.set(self.totalDownload, forKey: "totalDownload")
+            UserDefaults.standard.set(self.totalUpload, forKey: "totalUpload")
+            
+            // Network type
             self.networkType = self.detectNetwork()
         }
     }
@@ -77,10 +80,9 @@ class NetworkSpeedMonitor: ObservableObject {
         lastSent = data.sent
     }
     
-    // MARK: - Network Detection (Improved)
+    // MARK: - Network Detection
     
     private func detectNetwork() -> String {
-        // Basic but better than hardcoded
         if isInterfaceActive("en0") {
             return "WiFi"
         } else if isInterfaceActive("en1") {
@@ -126,7 +128,6 @@ class NetworkSpeedMonitor: ObservableObject {
                 let interface = pointer!.pointee
                 let name = String(cString: interface.ifa_name)
                 
-                // ✅ More robust (handles more Macs)
                 if name.hasPrefix("en") {
                     if let data = interface.ifa_data {
                         let stats = data.assumingMemoryBound(to: if_data.self).pointee
@@ -168,5 +169,9 @@ class NetworkSpeedMonitor: ObservableObject {
     func resetTotals() {
         totalDownload = 0
         totalUpload = 0
+        
+        // ✅ Also clear saved data
+        UserDefaults.standard.set(0, forKey: "totalDownload")
+        UserDefaults.standard.set(0, forKey: "totalUpload")
     }
 }

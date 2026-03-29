@@ -78,5 +78,8 @@ If you like this project, give it a ⭐ on GitHub!
 
 
 <img width="350" height="365" alt="Screenshot 2026-03-29 at 6 43 54 PM" src="https://github.com/user-attachments/assets/c51e8428-088e-41ff-b6a8-681210f806f7" />
+<img width="377" height="429" alt="Screenshot 2026-03-29 at 6 44 59 PM" src="https://github.com/user-attachments/assets/992ea7a5-c462-46e6-8d8f-5dfaf73ffab9" />
+
+
 
 

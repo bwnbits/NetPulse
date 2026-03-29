@@ -11,27 +11,47 @@ struct ContentView: View {
     @StateObject var monitor = NetworkSpeedMonitor()
     
     var body: some View {
-        VStack(spacing: 20) {
+        VStack(spacing: 16) {
             
-            Image(systemName: "arrow.up.arrow.down")
-                .font(.system(size: 30))
-            
-            Text("Live Network Speed")
+            // Title
+            Text("NetPulse")
                 .font(.headline)
             
-            Text("\(Int(monitor.downloadSpeed)) KB/s")
-                .font(.system(size: 36, weight: .bold))
+            // BIG SPEED
+            Text(monitor.formatSpeed(monitor.downloadSpeed))
+                .font(.system(size: 32, weight: .bold))
             
+            // UP / DOWN
+            HStack(spacing: 12) {
+                Text("↓ \(monitor.formatSpeed(monitor.downloadSpeed))")
+                Text("↑ \(monitor.formatSpeed(monitor.uploadSpeed))")
+            }
+            .font(.system(size: 13))
+            
+            Divider()
+            
+            // TOTALS + NETWORK
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Total Download: \(monitor.formatData(monitor.totalDownload))")
+                Text("Total Upload: \(monitor.formatData(monitor.totalUpload))")
+                Text("Network: \(monitor.networkType)")
+            }
+            .font(.system(size: 12))
+            
+            Divider()
+            
+            // CONTROLS
             HStack {
-                Text("↓ \(Int(monitor.downloadSpeed)) KB/s")
-                Text("↑ \(Int(monitor.uploadSpeed)) KB/s")
+                Toggle("Monitoring", isOn: $monitor.isMonitoring)
+                
+                Spacer()
+                
+                Button("Reset") {
+                    monitor.resetTotals()
+                }
             }
         }
         .padding()
-        .frame(width: 300, height: 180)
+        .frame(width: 280)
     }
-}
-
-#Preview {
-    ContentView()
 }

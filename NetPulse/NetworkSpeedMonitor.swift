@@ -11,14 +11,26 @@ class NetworkSpeedMonitor: ObservableObject {
     
     @Published var downloadSpeed: Double = 0
     @Published var uploadSpeed: Double = 0
+    @Published var totalDownload: Double = 0   // in KB
+    @Published var totalUpload: Double = 0     // in KB
+    @Published var networkType: String = "Unknown"
+    @Published var isMonitoring: Bool = true
     
     private var lastReceived: UInt64 = 0
     private var lastSent: UInt64 = 0
     private var timer: Timer?
     
+    // ✅ SINGLE INIT (fixed)
     init() {
+        initializeBaseline()
         startMonitoring()
     }
+    
+    deinit {
+        timer?.invalidate()
+    }
+    
+    // MARK: - Timer
     
     private func startMonitoring() {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
@@ -26,7 +38,11 @@ class NetworkSpeedMonitor: ObservableObject {
         }
     }
     
+    // MARK: - Core Logic
+    
     private func updateSpeed() {
+        guard isMonitoring else { return }
+        
         let data = getNetworkBytes()
         
         let down = data.received - lastReceived
@@ -36,10 +52,67 @@ class NetworkSpeedMonitor: ObservableObject {
         lastSent = data.sent
         
         DispatchQueue.main.async {
-            self.downloadSpeed = Double(down) / 1024.0
-            self.uploadSpeed = Double(up) / 1024.0
+            
+            // Speed in MB/s
+            let downMB = Double(down) / (1024.0 * 1024.0)
+            let upMB = Double(up) / (1024.0 * 1024.0)
+            
+            self.downloadSpeed = downMB
+            self.uploadSpeed = upMB
+            
+            // ✅ FIXED TOTALS (convert bytes → KB and accumulate)
+            self.totalDownload += Double(down) / 1024.0
+            self.totalUpload += Double(up) / 1024.0
+            
+            // ✅ Better detection
+            self.networkType = self.detectNetwork()
         }
     }
+    
+    // MARK: - Baseline
+    
+    private func initializeBaseline() {
+        let data = getNetworkBytes()
+        lastReceived = data.received
+        lastSent = data.sent
+    }
+    
+    // MARK: - Network Detection (Improved)
+    
+    private func detectNetwork() -> String {
+        // Basic but better than hardcoded
+        if isInterfaceActive("en0") {
+            return "WiFi"
+        } else if isInterfaceActive("en1") {
+            return "Ethernet"
+        }
+        return "Unknown"
+    }
+    
+    private func isInterfaceActive(_ name: String) -> Bool {
+        var addrs: UnsafeMutablePointer<ifaddrs>?
+        
+        if getifaddrs(&addrs) == 0 {
+            var ptr = addrs
+            
+            while ptr != nil {
+                let interface = ptr!.pointee
+                let interfaceName = String(cString: interface.ifa_name)
+                
+                if interfaceName == name && (interface.ifa_flags & UInt32(IFF_UP)) != 0 {
+                    freeifaddrs(addrs)
+                    return true
+                }
+                
+                ptr = interface.ifa_next
+            }
+        }
+        
+        freeifaddrs(addrs)
+        return false
+    }
+    
+    // MARK: - Network Bytes
     
     private func getNetworkBytes() -> (received: UInt64, sent: UInt64) {
         var addrs: UnsafeMutablePointer<ifaddrs>?
@@ -53,9 +126,8 @@ class NetworkSpeedMonitor: ObservableObject {
                 let interface = pointer!.pointee
                 let name = String(cString: interface.ifa_name)
                 
-                // en0 = WiFi, en1 = Ethernet (usually)
-                if name == "en0" || name == "en1" {
-                    
+                // ✅ More robust (handles more Macs)
+                if name.hasPrefix("en") {
                     if let data = interface.ifa_data {
                         let stats = data.assumingMemoryBound(to: if_data.self).pointee
                         received += UInt64(stats.ifi_ibytes)
@@ -69,5 +141,32 @@ class NetworkSpeedMonitor: ObservableObject {
         
         freeifaddrs(addrs)
         return (received, sent)
+    }
+    
+    // MARK: - Formatters
+    
+    func formatSpeed(_ speed: Double) -> String {
+        if speed < 1 {
+            return String(format: "%.0f KB/s", speed * 1024)
+        } else {
+            return String(format: "%.2f MB/s", speed)
+        }
+    }
+    
+    func formatData(_ kb: Double) -> String {
+        if kb > 1024 * 1024 {
+            return String(format: "%.2f GB", kb / (1024 * 1024))
+        } else if kb > 1024 {
+            return String(format: "%.2f MB", kb / 1024)
+        } else {
+            return String(format: "%.0f KB", kb)
+        }
+    }
+    
+    // MARK: - Controls
+    
+    func resetTotals() {
+        totalDownload = 0
+        totalUpload = 0
     }
 }

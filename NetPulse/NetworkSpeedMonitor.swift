@@ -3,7 +3,6 @@
 //
 // Real-time network speed monitoring using getifaddrs (system-level).
 // No random values. No fake data.
-
 import Foundation
 import Combine
 import Darwin
@@ -15,7 +14,7 @@ class NetworkSpeedMonitor: ObservableObject {
     @Published var downloadSpeed: Double = 0   // MB/s
     @Published var uploadSpeed: Double = 0     // MB/s
 
-    // MARK: - Session Totals
+    // MARK: - Session Totals (PERSISTED)
     @Published var totalDownload: Double = 0   // KB cumulative
     @Published var totalUpload: Double = 0     // KB cumulative
 
@@ -35,12 +34,18 @@ class NetworkSpeedMonitor: ObservableObject {
     private var prevBytesOut: UInt64 = 0
     private var cancellables = Set<AnyCancellable>()
 
+    // MARK: - Persistence Keys
+    private let downloadKey = "netpulse_total_download"
+    private let uploadKey   = "netpulse_total_upload"
+
     // MARK: - Init
     init() {
-        // Seed previous values so first delta isn't huge
         let (bytesIn, bytesOut) = Self.readNetworkBytes()
         prevBytesIn  = bytesIn
         prevBytesOut = bytesOut
+
+        loadTotals() // ✅ LOAD SAVED DATA
+
         startMonitoring()
         observeSpeedTestManager()
     }
@@ -49,10 +54,12 @@ class NetworkSpeedMonitor: ObservableObject {
 
     func startMonitoring() {
         timer?.invalidate()
+
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             guard let self, self.isMonitoring else { return }
             Task { @MainActor in self.tick() }
         }
+
         RunLoop.main.add(timer!, forMode: .common)
     }
 
@@ -67,7 +74,7 @@ class NetworkSpeedMonitor: ObservableObject {
         let (bytesIn, bytesOut) = Self.readNetworkBytes()
 
         let deltaIn  = bytesIn  >= prevBytesIn  ? bytesIn  - prevBytesIn  : 0
-        let deltaOut = bytesOut >= prevBytesOut  ? bytesOut - prevBytesOut : 0
+        let deltaOut = bytesOut >= prevBytesOut ? bytesOut - prevBytesOut : 0
 
         prevBytesIn  = bytesIn
         prevBytesOut = bytesOut
@@ -79,11 +86,36 @@ class NetworkSpeedMonitor: ObservableObject {
         downloadSpeed = downMBs
         uploadSpeed   = upMBs
 
-        // Accumulate session totals in KB
+        // Accumulate totals (KB)
         totalDownload += Double(deltaIn)  / 1_024
         totalUpload   += Double(deltaOut) / 1_024
 
+        // Save persistently
+        saveTotals()
+
         networkType = Self.activeInterface()
+    }
+
+    // MARK: - Persistence
+
+    private func saveTotals() {
+        UserDefaults.standard.set(totalDownload, forKey: downloadKey)
+        UserDefaults.standard.set(totalUpload,   forKey: uploadKey)
+    }
+
+    private func loadTotals() {
+        totalDownload = UserDefaults.standard.double(forKey: downloadKey)
+        totalUpload   = UserDefaults.standard.double(forKey: uploadKey)
+    }
+
+    // MARK: - Reset
+
+    func resetTotals() {
+        totalDownload = 0
+        totalUpload   = 0
+
+        UserDefaults.standard.removeObject(forKey: downloadKey)
+        UserDefaults.standard.removeObject(forKey: uploadKey)
     }
 
     // MARK: - Observe SpeedTestManager
@@ -91,11 +123,11 @@ class NetworkSpeedMonitor: ObservableObject {
     private func observeSpeedTestManager() {
         let mgr = SpeedTestManager.shared
 
-        // When isRunning flips to false, the test just completed
         mgr.$isRunning
             .receive(on: DispatchQueue.main)
             .sink { [weak self] running in
                 guard let self else { return }
+
                 if !running && self.isTestingSpeed {
                     self.testDownloadMbps = mgr.download
                     self.testUploadMbps   = mgr.upload
@@ -110,18 +142,21 @@ class NetworkSpeedMonitor: ObservableObject {
 
     func runSpeedTest() {
         guard !isTestingSpeed else { return }
+
         isTestingSpeed = true
-        // Reset previous results while testing
+
         testDownloadMbps = 0
         testUploadMbps   = 0
         testPingMs       = 0
+
         SpeedTestManager.shared.startTest()
     }
 
-    // MARK: - Helpers
+    // MARK: - Format Helpers
 
     func formatSpeed(_ mbPerSec: Double) -> String {
         let kbPerSec = mbPerSec * 1024
+
         if kbPerSec < 1 {
             return "0 KB/s"
         } else if kbPerSec < 1024 {
@@ -141,14 +176,8 @@ class NetworkSpeedMonitor: ObservableObject {
         }
     }
 
-    func resetTotals() {
-        totalDownload = 0
-        totalUpload   = 0
-    }
+    // MARK: - System Network Bytes
 
-    // MARK: - System Network Bytes (getifaddrs)
-
-    /// Reads total bytes in/out across all active non-loopback interfaces.
     static func readNetworkBytes() -> (bytesIn: UInt64, bytesOut: UInt64) {
         var bytesIn:  UInt64 = 0
         var bytesOut: UInt64 = 0
@@ -160,44 +189,55 @@ class NetworkSpeedMonitor: ObservableObject {
         defer { freeifaddrs(start) }
 
         var cursor: UnsafeMutablePointer<ifaddrs>? = start
+
         while let iface = cursor {
             let flags = Int32(iface.pointee.ifa_flags)
+
             let isUp       = (flags & IFF_UP) != 0
             let isLoopback = (flags & IFF_LOOPBACK) != 0
 
             if isUp && !isLoopback,
                iface.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_LINK),
                let data = iface.pointee.ifa_data {
+
                 let ifdata = data.assumingMemoryBound(to: if_data.self).pointee
                 bytesIn  += UInt64(ifdata.ifi_ibytes)
                 bytesOut += UInt64(ifdata.ifi_obytes)
             }
+
             cursor = iface.pointee.ifa_next
         }
+
         return (bytesIn, bytesOut)
     }
 
-    /// Returns the name of the primary active interface (Wi-Fi or Ethernet).
     static func activeInterface() -> String {
         var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+
         guard getifaddrs(&ifaddrPtr) == 0, let start = ifaddrPtr else {
             return "Unknown"
         }
         defer { freeifaddrs(start) }
 
         var cursor: UnsafeMutablePointer<ifaddrs>? = start
+
         while let iface = cursor {
             let flags = Int32(iface.pointee.ifa_flags)
+
             if (flags & IFF_UP) != 0,
                (flags & IFF_LOOPBACK) == 0,
                iface.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_INET) {
+
                 let name = String(cString: iface.pointee.ifa_name)
+
                 if name.hasPrefix("en0") { return "Wi-Fi" }
                 if name.hasPrefix("en1") { return "Ethernet" }
                 if name.hasPrefix("utun") { return "VPN" }
             }
+
             cursor = iface.pointee.ifa_next
         }
+
         return "Unknown"
     }
 }

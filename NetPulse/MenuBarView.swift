@@ -1,28 +1,37 @@
+// MenuBarView.swift
+// NetPulse
 //
-//  MenuBarView.swift
-//  NetPulse
-//
-//  Created by Abhishek Ruhela on 3/29/26.
-//
+// Shows live download ↓ and upload ↑ in the menu bar label.
+// Uses real MB/s values from NetworkSpeedMonitor (not test results).
+
 import SwiftUI
 
 struct MenuBarView: View {
-    
-    @ObservedObject var monitor: NetworkSpeedMonitor
-    
+
+    @EnvironmentObject var monitor: NetworkSpeedMonitor
+
     var body: some View {
-        Text("\(menuFormat(monitor.downloadSpeed))↓ \(menuFormat(monitor.uploadSpeed))↑")
-            .font(.system(size: 12, weight: .medium))
+        HStack(spacing: 4) {
+            Image(systemName: "arrow.down.circle.fill")
+                .foregroundColor(.green)
+                .imageScale(.small)
+            Text(shortSpeed(monitor.downloadSpeed))
+                .monospacedDigit()
+
+            Image(systemName: "arrow.up.circle.fill")
+                .foregroundColor(.blue)
+                .imageScale(.small)
+            Text(shortSpeed(monitor.uploadSpeed))
+                .monospacedDigit()
+        }
+        .font(.system(size: 12, weight: .medium))
     }
-}
 
-// MARK: - Compact Formatter (Menu Bar)
-
-func menuFormat(_ speed: Double) -> String {
-    if speed < 1 {
-        let kb = speed * 1024
-        return "\(Int(kb))K"
-    } else {
-        return String(format: "%.1fM", speed)
+    /// Compact format: "12.3M" or "512K"
+    private func shortSpeed(_ mbPerSec: Double) -> String {
+        let kb = mbPerSec * 1024
+        if kb < 1    { return "0K" }
+        if kb < 1024 { return String(format: "%.0fK", kb) }
+        return String(format: "%.1fM", mbPerSec)
     }
 }

@@ -1,196 +1,203 @@
+// NetworkSpeedMonitor.swift
+// NetPulse
+//
+// Real-time network speed monitoring using getifaddrs (system-level).
+// No random values. No fake data.
+
 import Foundation
 import Combine
+import Darwin
 
 @MainActor
 class NetworkSpeedMonitor: ObservableObject {
-    
-    @Published var downloadSpeed: Double = 0
-    @Published var uploadSpeed: Double = 0
-    @Published var totalDownload: Double = 0
-    @Published var totalUpload: Double = 0
+
+    // MARK: - Live Speed (updated every second)
+    @Published var downloadSpeed: Double = 0   // MB/s
+    @Published var uploadSpeed: Double = 0     // MB/s
+
+    // MARK: - Session Totals
+    @Published var totalDownload: Double = 0   // KB cumulative
+    @Published var totalUpload: Double = 0     // KB cumulative
+
+    // MARK: - Network Info
     @Published var networkType: String = "Unknown"
     @Published var isMonitoring: Bool = true
-    
-    @Published var maxDownloadMbps: Double = 0
-    @Published var maxUploadMbps: Double = 0
+
+    // MARK: - Speed Test Results
+    @Published var testDownloadMbps: Double = 0
+    @Published var testUploadMbps: Double = 0
+    @Published var testPingMs: Int = 0
     @Published var isTestingSpeed: Bool = false
-    
-    private var lastReceived: UInt64 = 0
-    private var lastSent: UInt64 = 0
+
+    // MARK: - Private
     private var timer: Timer?
-    
-    private var jsonURL: URL {
-        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("NetPulse", isDirectory: true)
-        
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        
-        return folder.appendingPathComponent("speed.json")
-    }
-    
-    // MARK: - SPEED TEST
-    
-    func runSpeedTest() {
-        if isTestingSpeed { return }
-        
-        isTestingSpeed = true
-        
-        let tester = SpeedTestManager()
-        
-        tester.startTest { download, upload in
-            self.maxDownloadMbps = download
-            self.maxUploadMbps = upload
-            self.isTestingSpeed = false
-            
-            let result: [String: Any] = [
-                "download": download,
-                "upload": upload
-            ]
-            
-            if let data = try? JSONSerialization.data(withJSONObject: result) {
-                try? data.write(to: self.jsonURL)
-            }
-        }
-    }
-    
-    // MARK: - INIT
-    
+    private var prevBytesIn: UInt64 = 0
+    private var prevBytesOut: UInt64 = 0
+    private var cancellables = Set<AnyCancellable>()
+
+    // MARK: - Init
     init() {
-        totalDownload = UserDefaults.standard.double(forKey: "totalDownload")
-        totalUpload = UserDefaults.standard.double(forKey: "totalUpload")
-        
-        loadLastResult()
-        initializeBaseline()
+        // Seed previous values so first delta isn't huge
+        let (bytesIn, bytesOut) = Self.readNetworkBytes()
+        prevBytesIn  = bytesIn
+        prevBytesOut = bytesOut
         startMonitoring()
+        observeSpeedTestManager()
     }
-    
-    private func loadLastResult() {
-        if let data = try? Data(contentsOf: jsonURL),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            
-            maxDownloadMbps = json["download"] as? Double ?? 0
-            maxUploadMbps = json["upload"] as? Double ?? 0
-        }
-    }
-    
-    deinit {
+
+    // MARK: - Start / Stop Monitoring
+
+    func startMonitoring() {
         timer?.invalidate()
-    }
-    
-    private func startMonitoring() {
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
-            self.updateSpeed()
+        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
+            guard let self, self.isMonitoring else { return }
+            Task { @MainActor in self.tick() }
         }
+        RunLoop.main.add(timer!, forMode: .common)
     }
-    
-    private func updateSpeed() {
-        guard isMonitoring else { return }
-        
-        let data = getNetworkBytes()
-        
-        let down = data.received - lastReceived
-        let up = data.sent - lastSent
-        
-        lastReceived = data.received
-        lastSent = data.sent
-        
-        let downMB = Double(down) / (1024.0 * 1024.0)
-        let upMB = Double(up) / (1024.0 * 1024.0)
-        
-        self.downloadSpeed = downMB
-        self.uploadSpeed = upMB
-        
-        self.totalDownload += Double(down) / 1024.0
-        self.totalUpload += Double(up) / 1024.0
-        
-        UserDefaults.standard.set(self.totalDownload, forKey: "totalDownload")
-        UserDefaults.standard.set(self.totalUpload, forKey: "totalUpload")
-        
-        self.networkType = detectNetwork()
+
+    func stopMonitoring() {
+        timer?.invalidate()
+        timer = nil
     }
-    
-    private func initializeBaseline() {
-        let data = getNetworkBytes()
-        lastReceived = data.received
-        lastSent = data.sent
+
+    // MARK: - Per-second Tick
+
+    private func tick() {
+        let (bytesIn, bytesOut) = Self.readNetworkBytes()
+
+        let deltaIn  = bytesIn  >= prevBytesIn  ? bytesIn  - prevBytesIn  : 0
+        let deltaOut = bytesOut >= prevBytesOut  ? bytesOut - prevBytesOut : 0
+
+        prevBytesIn  = bytesIn
+        prevBytesOut = bytesOut
+
+        // Convert bytes → MB/s
+        let downMBs = Double(deltaIn)  / 1_048_576
+        let upMBs   = Double(deltaOut) / 1_048_576
+
+        downloadSpeed = downMBs
+        uploadSpeed   = upMBs
+
+        // Accumulate session totals in KB
+        totalDownload += Double(deltaIn)  / 1_024
+        totalUpload   += Double(deltaOut) / 1_024
+
+        networkType = Self.activeInterface()
     }
-    
-    private func detectNetwork() -> String {
-        if isInterfaceActive("en0") { return "WiFi" }
-        if isInterfaceActive("en1") { return "Ethernet" }
-        return "Unknown"
-    }
-    
-    private func isInterfaceActive(_ name: String) -> Bool {
-        var addrs: UnsafeMutablePointer<ifaddrs>?
-        
-        if getifaddrs(&addrs) == 0 {
-            var ptr = addrs
-            
-            while ptr != nil {
-                let interface = ptr!.pointee
-                let interfaceName = String(cString: interface.ifa_name)
-                
-                if interfaceName == name && (interface.ifa_flags & UInt32(IFF_UP)) != 0 {
-                    freeifaddrs(addrs)
-                    return true
+
+    // MARK: - Observe SpeedTestManager
+
+    private func observeSpeedTestManager() {
+        let mgr = SpeedTestManager.shared
+
+        // When isRunning flips to false, the test just completed
+        mgr.$isRunning
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] running in
+                guard let self else { return }
+                if !running && self.isTestingSpeed {
+                    self.testDownloadMbps = mgr.download
+                    self.testUploadMbps   = mgr.upload
+                    self.testPingMs       = mgr.ping
+                    self.isTestingSpeed   = false
                 }
-                
-                ptr = interface.ifa_next
             }
+            .store(in: &cancellables)
+    }
+
+    // MARK: - Run Speed Test
+
+    func runSpeedTest() {
+        guard !isTestingSpeed else { return }
+        isTestingSpeed = true
+        // Reset previous results while testing
+        testDownloadMbps = 0
+        testUploadMbps   = 0
+        testPingMs       = 0
+        SpeedTestManager.shared.startTest()
+    }
+
+    // MARK: - Helpers
+
+    func formatSpeed(_ mbPerSec: Double) -> String {
+        let kbPerSec = mbPerSec * 1024
+        if kbPerSec < 1 {
+            return "0 KB/s"
+        } else if kbPerSec < 1024 {
+            return String(format: "%.0f KB/s", kbPerSec)
+        } else {
+            return String(format: "%.2f MB/s", mbPerSec)
         }
-        
-        freeifaddrs(addrs)
-        return false
     }
-    
-    private func getNetworkBytes() -> (received: UInt64, sent: UInt64) {
-        var addrs: UnsafeMutablePointer<ifaddrs>?
-        var received: UInt64 = 0
-        var sent: UInt64 = 0
-        
-        if getifaddrs(&addrs) == 0 {
-            var pointer = addrs
-            
-            while pointer != nil {
-                let interface = pointer!.pointee
-                let name = String(cString: interface.ifa_name)
-                
-                if name.hasPrefix("en") {
-                    if let data = interface.ifa_data {
-                        let stats = data.assumingMemoryBound(to: if_data.self).pointee
-                        received += UInt64(stats.ifi_ibytes)
-                        sent += UInt64(stats.ifi_obytes)
-                    }
-                }
-                
-                pointer = interface.ifa_next
-            }
-        }
-        
-        freeifaddrs(addrs)
-        return (received, sent)
-    }
-    
-    func formatSpeed(_ speed: Double) -> String {
-        speed < 1 ? "\(Int(speed * 1024)) KB/s" : String(format: "%.2f MB/s", speed)
-    }
-    
+
     func formatData(_ kb: Double) -> String {
-        if kb > 1024 * 1024 {
-            return String(format: "%.2f GB", kb / (1024 * 1024))
+        if kb > 1_048_576 {
+            return String(format: "%.2f GB", kb / 1_048_576)
         } else if kb > 1024 {
             return String(format: "%.2f MB", kb / 1024)
         } else {
-            return "\(Int(kb)) KB"
+            return String(format: "%.0f KB", kb)
         }
     }
-    
+
     func resetTotals() {
         totalDownload = 0
-        totalUpload = 0
-        
-        UserDefaults.standard.set(0, forKey: "totalDownload")
-        UserDefaults.standard.set(0, forKey: "totalUpload")
+        totalUpload   = 0
+    }
+
+    // MARK: - System Network Bytes (getifaddrs)
+
+    /// Reads total bytes in/out across all active non-loopback interfaces.
+    static func readNetworkBytes() -> (bytesIn: UInt64, bytesOut: UInt64) {
+        var bytesIn:  UInt64 = 0
+        var bytesOut: UInt64 = 0
+
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddrPtr) == 0, let start = ifaddrPtr else {
+            return (0, 0)
+        }
+        defer { freeifaddrs(start) }
+
+        var cursor: UnsafeMutablePointer<ifaddrs>? = start
+        while let iface = cursor {
+            let flags = Int32(iface.pointee.ifa_flags)
+            let isUp       = (flags & IFF_UP) != 0
+            let isLoopback = (flags & IFF_LOOPBACK) != 0
+
+            if isUp && !isLoopback,
+               iface.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_LINK),
+               let data = iface.pointee.ifa_data {
+                let ifdata = data.assumingMemoryBound(to: if_data.self).pointee
+                bytesIn  += UInt64(ifdata.ifi_ibytes)
+                bytesOut += UInt64(ifdata.ifi_obytes)
+            }
+            cursor = iface.pointee.ifa_next
+        }
+        return (bytesIn, bytesOut)
+    }
+
+    /// Returns the name of the primary active interface (Wi-Fi or Ethernet).
+    static func activeInterface() -> String {
+        var ifaddrPtr: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&ifaddrPtr) == 0, let start = ifaddrPtr else {
+            return "Unknown"
+        }
+        defer { freeifaddrs(start) }
+
+        var cursor: UnsafeMutablePointer<ifaddrs>? = start
+        while let iface = cursor {
+            let flags = Int32(iface.pointee.ifa_flags)
+            if (flags & IFF_UP) != 0,
+               (flags & IFF_LOOPBACK) == 0,
+               iface.pointee.ifa_addr?.pointee.sa_family == UInt8(AF_INET) {
+                let name = String(cString: iface.pointee.ifa_name)
+                if name.hasPrefix("en0") { return "Wi-Fi" }
+                if name.hasPrefix("en1") { return "Ethernet" }
+                if name.hasPrefix("utun") { return "VPN" }
+            }
+            cursor = iface.pointee.ifa_next
+        }
+        return "Unknown"
     }
 }

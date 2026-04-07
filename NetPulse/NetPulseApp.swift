@@ -1,22 +1,34 @@
+// NetPulseApp.swift
+// NetPulse
 //
-//  NetPulseApp.swift
-//  NetPulse
-//
-//  Created by Abhishek Ruhela on 3/29/26.
-//
+// Single source of truth: monitor created once here and injected everywhere.
+
 import SwiftUI
 
 @main
 struct NetPulseApp: App {
-    
-    @StateObject var monitor = NetworkSpeedMonitor()
-    
+
+    @StateObject private var monitor = NetworkSpeedMonitor()
+
     var body: some Scene {
-        MenuBarExtra {
-            ContentView(monitor: monitor)
-                .frame(width: 280, height: 240)
-        } label: {
-            MenuBarView(monitor: monitor)
+
+        // Main window (optional — can be hidden if pure menu-bar app)
+        WindowGroup {
+            MainWindowView()
+                .environmentObject(monitor)
         }
+        .windowStyle(.hiddenTitleBar)
+        .windowResizability(.contentSize)
+
+        // Menu bar
+        MenuBarExtra {
+            ContentView()
+                .environmentObject(monitor)
+                .frame(width: 300)
+        } label: {
+            MenuBarView()
+                .environmentObject(monitor)
+        }
+        .menuBarExtraStyle(.window)
     }
 }

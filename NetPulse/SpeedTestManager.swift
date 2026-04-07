@@ -1,176 +1,193 @@
+// SpeedTestManager.swift
+// NetPulse
 //
-//  SpeedTestManager.swift
-//  NetPulse
-//
-//  Created by Abhishek Ruhela on 3/7/26.
-//
-import Foundation
+// Speed test with:
+//  - Smaller download file (10 MB cap via byte limit + cancel)
+//  - Upload capped at 2 MB
+//  - Task cancelled after 30 s or 10 MB received
+//  - Completion driven by real delegate callbacks (no DispatchQueue.after)
 
-class SpeedTestManager: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate {
-    
-    private var startTime: Date?
-    private var receivedBytes: Int64 = 0
-    private var sentBytes: Int64 = 0
-    
-    private var completion: ((Double, Double) -> Void)?
-    
-    private var taskCompletion: (() -> Void)?
-    private var uploadCompletion: (() -> Void)?
-    
-    // MARK: - START TEST
-    
-    func startTest(completion: @escaping (Double, Double) -> Void) {
-        self.completion = completion
-        
-        runDownloadTest { download in
-            self.runUploadTest { upload in
+import Foundation
+import Combine
+
+class SpeedTestManager: NSObject, ObservableObject {
+
+    static let shared = SpeedTestManager()
+    private override init() {}
+
+    // Observed by NetworkSpeedMonitor via Combine
+    @Published var download: Double  = 0    // Mbps
+    @Published var upload: Double    = 0    // Mbps
+    @Published var ping: Int         = 0    // ms
+    @Published var isRunning: Bool   = false
+
+    // MARK: - Private state
+
+    private var startTime: Date       = Date()
+    private var receivedBytes: Int64  = 0
+    private var sentBytes: Int64      = 0
+
+    private let downloadCap: Int64    = 10 * 1024 * 1024   // 10 MB cap
+    private let downloadTimeout: TimeInterval = 30
+    private let uploadSize: Int       = 2 * 1024 * 1024    // 2 MB upload payload
+
+    private var downloadTask: URLSessionDataTask?
+    private var downloadSession: URLSession?
+    private var uploadSession: URLSession?
+
+    private var downloadCompletion: ((Double) -> Void)?
+    private var uploadCompletion:   ((Double) -> Void)?
+
+    // MARK: - Public entry point
+
+    func startTest() {
+        guard !isRunning else { return }
+
+        DispatchQueue.main.async { self.isRunning = true }
+        download = 0
+        upload   = 0
+        ping     = measurePing()
+
+        runDownloadTest { [weak self] mbps in
+            guard let self else { return }
+            DispatchQueue.main.async { self.download = mbps }
+
+            self.runUploadTest { uploadMbps in
                 DispatchQueue.main.async {
-                    completion(download, upload)
+                    self.upload    = uploadMbps
+                    self.isRunning = false
                 }
             }
         }
     }
-    
-    // MARK: - DOWNLOAD TEST
-    
+
+    // MARK: - Ping (synchronous, off main thread)
+
+    private func measurePing() -> Int {
+        let sem = DispatchSemaphore(value: 0)
+        let start = Date()
+        var elapsed = 0
+
+        var req = URLRequest(url: URL(string: "https://www.google.com")!)
+        req.timeoutInterval = 5
+
+        URLSession.shared.dataTask(with: req) { _, _, _ in
+            elapsed = Int(Date().timeIntervalSince(start) * 1000)
+            sem.signal()
+        }.resume()
+
+        sem.wait()
+        return elapsed
+    }
+
+    // MARK: - Download Test
+
     private func runDownloadTest(completion: @escaping (Double) -> Void) {
-        startTime = Date()
         receivedBytes = 0
-        
-        // ✅ Primary + fallback URLs
-        let urls = [
-            "https://proof.ovh.net/files/100Mb.dat",
-            "https://speed.cloudflare.com/__down?bytes=100000000",
-            "https://download.thinkbroadband.com/100MB.zip"
-        ]
-        
-        startDownload(from: urls, index: 0, completion: completion)
-    }
-    
-    private func startDownload(from urls: [String], index: Int, completion: @escaping (Double) -> Void) {
-        
-        if index >= urls.count {
-            DispatchQueue.main.async {
-                completion(0)
-            }
-            return
+        startTime     = Date()
+
+        // 10 MB file — we'll cancel as soon as we hit downloadCap
+        guard let url = URL(string: "https://proof.ovh.net/files/10Mb.dat") else {
+            completion(0); return
         }
-        
-        guard let url = URL(string: urls[index]) else {
-            startDownload(from: urls, index: index + 1, completion: completion)
-            return
-        }
-        
-        print("⬇️ Trying:", url.absoluteString)
-        
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+
+        downloadCompletion = completion
+
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest  = downloadTimeout
+        config.timeoutIntervalForResource = downloadTimeout
+
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        downloadSession = session
+
         let task = session.dataTask(with: url)
-        
+        downloadTask = task
         task.resume()
-        
-        taskCompletion = { [weak self] in
-            guard let self = self else { return }
-            
-            let duration = Date().timeIntervalSince(self.startTime ?? Date())
-            
-            if self.receivedBytes == 0 {
-                print("⚠️ Download failed, trying fallback...")
-                self.startDownload(from: urls, index: index + 1, completion: completion)
-                return
-            }
-            
-            let mbps = (Double(self.receivedBytes) * 8) / duration / 1_000_000
-            
-            DispatchQueue.main.async {
-                completion(mbps)
-            }
+
+        // Hard timeout cancel
+        DispatchQueue.global().asyncAfter(deadline: .now() + downloadTimeout) { [weak self] in
+            self?.finishDownload()
         }
     }
-    
-    // MARK: - UPLOAD TEST
-    
+
+    private func finishDownload() {
+        downloadTask?.cancel()
+        downloadTask = nil
+
+        let duration = max(Date().timeIntervalSince(startTime), 0.001)
+        let mbps = (Double(receivedBytes) * 8) / duration / 1_000_000
+
+        let cb = downloadCompletion
+        downloadCompletion = nil
+        cb?(mbps)
+    }
+
+    // MARK: - Upload Test
+
     private func runUploadTest(completion: @escaping (Double) -> Void) {
-        startTime = Date()
         sentBytes = 0
-        
-        let urls = [
-            "https://httpbin.org/post",
-            "https://postman-echo.com/post"
-        ]
-        
-        startUpload(to: urls, index: 0, completion: completion)
+        startTime = Date()
+
+        guard let url = URL(string: "https://httpbin.org/post") else {
+            completion(0); return
+        }
+
+        uploadCompletion = completion
+
+        let data = Data(count: uploadSize)    // 2 MB of zeros
+        var req  = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 30
+
+        let config   = URLSessionConfiguration.ephemeral
+        let session  = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+        uploadSession = session
+
+        session.uploadTask(with: req, from: data).resume()
     }
-    
-    private func startUpload(to urls: [String], index: Int, completion: @escaping (Double) -> Void) {
-        
-        if index >= urls.count {
-            DispatchQueue.main.async {
-                completion(0)
-            }
-            return
-        }
-        
-        guard let url = URL(string: urls[index]) else {
-            startUpload(to: urls, index: index + 1, completion: completion)
-            return
-        }
-        
-        print("⬆️ Trying:", url.absoluteString)
-        
-        let data = Data(count: 5 * 1024 * 1024) // 5MB
-        
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
-        let task = session.uploadTask(with: request, from: data)
-        
-        task.resume()
-        
-        uploadCompletion = { [weak self] in
-            guard let self = self else { return }
-            
-            let duration = Date().timeIntervalSince(self.startTime ?? Date())
-            
-            if self.sentBytes == 0 {
-                print("⚠️ Upload failed, trying fallback...")
-                self.startUpload(to: urls, index: index + 1, completion: completion)
-                return
-            }
-            
-            let mbps = (Double(self.sentBytes) * 8) / duration / 1_000_000
-            
-            DispatchQueue.main.async {
-                completion(mbps)
-            }
-        }
-    }
-    
-    // MARK: - DELEGATES
-    
-    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+}
+
+// MARK: - URLSession Delegates
+
+extension SpeedTestManager: URLSessionDataDelegate, URLSessionTaskDelegate {
+
+    // Called as download data arrives
+    func urlSession(_ session: URLSession,
+                    dataTask: URLSessionDataTask,
+                    didReceive data: Data) {
         receivedBytes += Int64(data.count)
+
+        // Cancel early once cap is hit
+        if receivedBytes >= downloadCap {
+            finishDownload()
+        }
     }
-    
-    func urlSession(_ session: URLSession, task: URLSessionTask,
+
+    // Called as upload bytes are sent
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
                     didSendBodyData bytesSent: Int64,
                     totalBytesSent: Int64,
                     totalBytesExpectedToSend: Int64) {
-        
         sentBytes = totalBytesSent
     }
-    
-    func urlSession(_ session: URLSession, task: URLSessionTask,
+
+    // Called when a task completes (success, cancel, or error)
+    func urlSession(_ session: URLSession,
+                    task: URLSessionTask,
                     didCompleteWithError error: Error?) {
-        
-        if let error = error {
-            print("❌ Error:", error.localizedDescription)
-        }
-        
+
         if task is URLSessionUploadTask {
-            uploadCompletion?()
+            let duration = max(Date().timeIntervalSince(startTime), 0.001)
+            let mbps = (Double(sentBytes) * 8) / duration / 1_000_000
+            let cb = uploadCompletion
+            uploadCompletion = nil
+            cb?(mbps)
         } else {
-            taskCompletion?()
+            // Download completed naturally (before cap) — finish if not already done
+            if downloadCompletion != nil {
+                finishDownload()
+            }
         }
     }
 }

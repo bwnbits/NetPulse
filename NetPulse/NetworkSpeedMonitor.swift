@@ -5,39 +5,151 @@ class NetworkSpeedMonitor: ObservableObject {
     
     @Published var downloadSpeed: Double = 0
     @Published var uploadSpeed: Double = 0
-    @Published var totalDownload: Double = 0   // in KB
-    @Published var totalUpload: Double = 0     // in KB
+    @Published var totalDownload: Double = 0
+    @Published var totalUpload: Double = 0
     @Published var networkType: String = "Unknown"
     @Published var isMonitoring: Bool = true
+    
+    @Published var maxDownloadMbps: Double = 0
+    @Published var maxUploadMbps: Double = 0
+    @Published var isTestingSpeed: Bool = false
     
     private var lastReceived: UInt64 = 0
     private var lastSent: UInt64 = 0
     private var timer: Timer?
     
-    // MARK: - INIT (Load saved data)
+    // MARK: - JSON FILE PATH
+    
+    private var jsonURL: URL {
+        let folder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("NetPulse", isDirectory: true)
+        
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        
+        return folder.appendingPathComponent("speed.json")
+    }
+    
+    // MARK: - SPEED TEST (brew)
+    
+    func runSpeedTest() {
+        if isTestingSpeed { return }
+        
+        isTestingSpeed = true
+        print("🚀 Running Speed Test (CLI)...")
+        
+        // 🔥 AUTO DETECT PATH
+        let paths = [
+            "/opt/homebrew/bin/speedtest-cli", // Apple Silicon
+            "/usr/local/bin/speedtest-cli"     // Intel
+        ]
+        
+        var executablePath: String?
+        
+        for path in paths {
+            if FileManager.default.fileExists(atPath: path) {
+                executablePath = path
+                break
+            }
+        }
+        
+        guard let finalPath = executablePath else {
+            DispatchQueue.main.async {
+                self.isTestingSpeed = false
+                print("❌ speedtest-cli not found. Run: brew install speedtest-cli")
+            }
+            return
+        }
+        
+        let process = Process()
+        let pipe = Pipe()
+        
+        process.executableURL = URL(fileURLWithPath: finalPath)
+        process.arguments = ["--json"]
+        process.standardOutput = pipe
+        process.standardError = pipe
+        
+        DispatchQueue.global(qos: .userInitiated).async {
+            do {
+                // 🔥 RESET JSON before run
+                try? FileManager.default.removeItem(at: self.jsonURL)
+                
+                try process.run()
+                process.waitUntilExit()
+                
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                
+                if data.isEmpty {
+                    throw NSError(domain: "EmptyOutput", code: 0)
+                }
+                
+                // Save JSON
+                try data.write(to: self.jsonURL)
+                
+                self.parseJSON(data)
+                
+            } catch {
+                DispatchQueue.main.async {
+                    self.isTestingSpeed = false
+                }
+                print("❌ speedtest-cli failed:", error)
+            }
+        }
+    }
+    
+    // MARK: - PARSE JSON
+    
+    private func parseJSON(_ data: Data) {
+        do {
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                
+                let download = (json["download"] as? Double ?? 0) / 1_000_000
+                let upload = (json["upload"] as? Double ?? 0) / 1_000_000
+                
+                DispatchQueue.main.async {
+                    self.maxDownloadMbps = download
+                    self.maxUploadMbps = upload
+                    self.isTestingSpeed = false
+                    
+                    print("✅ Download:", download, "Mbps")
+                    print("✅ Upload:", upload, "Mbps")
+                }
+            }
+        } catch {
+            DispatchQueue.main.async {
+                self.isTestingSpeed = false
+            }
+            print("❌ JSON parse error:", error)
+        }
+    }
+    
+    // MARK: - INIT
     
     init() {
-        // ✅ Load saved totals
         totalDownload = UserDefaults.standard.double(forKey: "totalDownload")
         totalUpload = UserDefaults.standard.double(forKey: "totalUpload")
         
+        loadLastResult()
         initializeBaseline()
         startMonitoring()
+    }
+    
+    private func loadLastResult() {
+        if let data = try? Data(contentsOf: jsonURL) {
+            parseJSON(data)
+        }
     }
     
     deinit {
         timer?.invalidate()
     }
     
-    // MARK: - Timer
+    // MARK: - MONITORING
     
     private func startMonitoring() {
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
             self.updateSpeed()
         }
     }
-    
-    // MARK: - Core Logic
     
     private func updateSpeed() {
         guard isMonitoring else { return }
@@ -51,28 +163,21 @@ class NetworkSpeedMonitor: ObservableObject {
         lastSent = data.sent
         
         DispatchQueue.main.async {
-            
-            // Speed (MB/s)
             let downMB = Double(down) / (1024.0 * 1024.0)
             let upMB = Double(up) / (1024.0 * 1024.0)
             
             self.downloadSpeed = downMB
             self.uploadSpeed = upMB
             
-            // ✅ Accumulate totals (KB)
             self.totalDownload += Double(down) / 1024.0
             self.totalUpload += Double(up) / 1024.0
             
-            // ✅ SAVE (critical fix)
             UserDefaults.standard.set(self.totalDownload, forKey: "totalDownload")
             UserDefaults.standard.set(self.totalUpload, forKey: "totalUpload")
             
-            // Network type
             self.networkType = self.detectNetwork()
         }
     }
-    
-    // MARK: - Baseline
     
     private func initializeBaseline() {
         let data = getNetworkBytes()
@@ -80,14 +185,9 @@ class NetworkSpeedMonitor: ObservableObject {
         lastSent = data.sent
     }
     
-    // MARK: - Network Detection
-    
     private func detectNetwork() -> String {
-        if isInterfaceActive("en0") {
-            return "WiFi"
-        } else if isInterfaceActive("en1") {
-            return "Ethernet"
-        }
+        if isInterfaceActive("en0") { return "WiFi" }
+        if isInterfaceActive("en1") { return "Ethernet" }
         return "Unknown"
     }
     
@@ -113,8 +213,6 @@ class NetworkSpeedMonitor: ObservableObject {
         freeifaddrs(addrs)
         return false
     }
-    
-    // MARK: - Network Bytes
     
     private func getNetworkBytes() -> (received: UInt64, sent: UInt64) {
         var addrs: UnsafeMutablePointer<ifaddrs>?
@@ -144,14 +242,10 @@ class NetworkSpeedMonitor: ObservableObject {
         return (received, sent)
     }
     
-    // MARK: - Formatters
+    // MARK: - FORMATTERS
     
     func formatSpeed(_ speed: Double) -> String {
-        if speed < 1 {
-            return String(format: "%.0f KB/s", speed * 1024)
-        } else {
-            return String(format: "%.2f MB/s", speed)
-        }
+        speed < 1 ? "\(Int(speed * 1024)) KB/s" : String(format: "%.2f MB/s", speed)
     }
     
     func formatData(_ kb: Double) -> String {
@@ -160,17 +254,14 @@ class NetworkSpeedMonitor: ObservableObject {
         } else if kb > 1024 {
             return String(format: "%.2f MB", kb / 1024)
         } else {
-            return String(format: "%.0f KB", kb)
+            return "\(Int(kb)) KB"
         }
     }
-    
-    // MARK: - Controls
     
     func resetTotals() {
         totalDownload = 0
         totalUpload = 0
         
-        // ✅ Also clear saved data
         UserDefaults.standard.set(0, forKey: "totalDownload")
         UserDefaults.standard.set(0, forKey: "totalUpload")
     }

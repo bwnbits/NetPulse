@@ -8,7 +8,7 @@ import SwiftUI
 
 struct ContentView: View {
     
-    @StateObject var monitor = NetworkSpeedMonitor()
+    @ObservedObject var monitor: NetworkSpeedMonitor
     
     var body: some View {
         VStack(spacing: 16) {
@@ -40,6 +40,33 @@ struct ContentView: View {
             
             Divider()
             
+            // SPEED TEST SECTION
+            VStack(spacing: 6) {
+                
+                if monitor.isTestingSpeed {
+                    Text("Testing speed...")
+                        .font(.system(size: 12))
+                    
+                } else if monitor.maxDownloadMbps == 0 && monitor.maxUploadMbps == 0 {
+                    
+                    Text("No test run yet")
+                        .font(.system(size: 12))
+                        .foregroundColor(.gray)
+                    
+                } else {
+                    
+                    Text("Max Download: \(String(format: "%.1f", monitor.maxDownloadMbps)) Mbps")
+                    Text("Max Upload: \(String(format: "%.1f", monitor.maxUploadMbps)) Mbps")
+                }
+                
+                Button("Run Speed Test") {
+                    monitor.runSpeedTest()
+                }
+                .font(.system(size: 12))
+            }
+            
+            Divider()
+            
             // CONTROLS
             HStack {
                 Toggle("Monitoring", isOn: $monitor.isMonitoring)
@@ -52,6 +79,6 @@ struct ContentView: View {
             }
         }
         .padding()
-        .frame(width: 280)
+        .frame(width: 280, height: 260) // slightly increased
     }
 }

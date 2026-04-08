@@ -27,7 +27,7 @@ class SpeedTestManager: NSObject, ObservableObject {
     private var receivedBytes: Int64  = 0
     private var sentBytes: Int64      = 0
 
-    private let downloadCap: Int64    = 10 * 1024 * 1024   // 10 MB cap
+    private let downloadCap: Int64    = 300 * 1024 * 1024   // 300MB cap
     private let downloadTimeout: TimeInterval = 30
     private let uploadSize: Int       = 2 * 1024 * 1024    // 2 MB upload payload
 

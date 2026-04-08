@@ -2,6 +2,10 @@
 // NetPulse
 // Full main window — shown when user opens the app from Dock / Spotlight.
 // Displays live speed, session stats, and speed test in an Apple-style card layout.
+// MainWindowView.swift
+// NetPulse
+// Full main window — shown when user opens the app from Dock / Spotlight.
+// Displays live speed, session stats, and speed test in an Apple-style card layout.
 
 import SwiftUI
 
@@ -166,7 +170,7 @@ private struct SpeedTestTab: View {
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "info.circle")
                     .foregroundColor(.secondary)
-                Text("Data usage is capped at ~500 MB per test (400 MB download + 100 MB upload). Test may take up to 30 seconds.")
+                Text("Data usage is ~720 MB per test (6×100 MB download + 6×20 MB upload). Test takes ~15–75 seconds.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }

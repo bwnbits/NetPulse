@@ -19,7 +19,7 @@ class NetworkSpeedMonitor: ObservableObject {
     @Published var totalUpload: Double = 0     // KB cumulative
 
     // MARK: - Network Info
-    @Published var networkType: String = "Unknown"
+    @Published var networkType: String = "Ethernet"
     @Published var isMonitoring: Bool = true
 
     // MARK: - Speed Test Results
@@ -238,6 +238,6 @@ class NetworkSpeedMonitor: ObservableObject {
             cursor = iface.pointee.ifa_next
         }
 
-        return "Unknown"
+        return "Ethernet-github/bwnbits"
     }
 }

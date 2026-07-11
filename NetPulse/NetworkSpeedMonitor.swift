@@ -6,6 +6,8 @@
 import Foundation
 import Combine
 import Darwin
+import AppKit
+import ServiceManagement
 
 @MainActor
 class NetworkSpeedMonitor: ObservableObject {
@@ -28,6 +30,25 @@ class NetworkSpeedMonitor: ObservableObject {
     @Published var testPingMs: Int = 0
     @Published var isTestingSpeed: Bool = false
 
+    // MARK: - App Preferences (PERSISTED)
+
+    /// Controls whether NetPulse shows an icon in the Dock.
+    /// When false, the app runs purely as a menu-bar (accessory) app.
+    @Published var showDockIcon: Bool = false {
+        didSet {
+            UserDefaults.standard.set(showDockIcon, forKey: dockIconKey)
+            applyDockIconPolicy()
+        }
+    }
+
+    /// Controls whether NetPulse launches automatically at login.
+    @Published var launchAtLogin: Bool = false {
+        didSet {
+            UserDefaults.standard.set(launchAtLogin, forKey: launchAtLoginKey)
+            updateLoginItem(enabled: launchAtLogin)
+        }
+    }
+
     // MARK: - Private
     private var timer: Timer?
     private var prevBytesIn: UInt64 = 0
@@ -37,6 +58,8 @@ class NetworkSpeedMonitor: ObservableObject {
     // MARK: - Persistence Keys
     private let downloadKey = "netpulse_total_download"
     private let uploadKey   = "netpulse_total_upload"
+    private let dockIconKey = "netpulse_show_dock_icon"
+    private let launchAtLoginKey = "netpulse_launch_at_login"
 
     // MARK: - Init
     init() {
@@ -45,6 +68,10 @@ class NetworkSpeedMonitor: ObservableObject {
         prevBytesOut = bytesOut
 
         loadTotals() // ✅ LOAD SAVED DATA
+
+        // ✅ LOAD SAVED PREFERENCES (fires didSet → applies policy / login item)
+        showDockIcon  = UserDefaults.standard.object(forKey: dockIconKey) as? Bool ?? false
+        launchAtLogin = UserDefaults.standard.object(forKey: launchAtLoginKey) as? Bool ?? false
 
         startMonitoring()
         observeSpeedTestManager()
@@ -173,6 +200,41 @@ class NetworkSpeedMonitor: ObservableObject {
             return String(format: "%.2f MB", kb / 1024)
         } else {
             return String(format: "%.0f KB", kb)
+        }
+    }
+
+    // MARK: - Dock Icon / Activation Policy
+
+    private func applyDockIconPolicy() {
+        NSApp.setActivationPolicy(showDockIcon ? .regular : .accessory)
+
+        // When switching to .regular, bring the app forward so the Dock
+        // icon + main window feel responsive rather than appearing "stuck".
+        if showDockIcon {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
+    // MARK: - Launch at Login
+
+    private func updateLoginItem(enabled: Bool) {
+        guard #available(macOS 13.0, *) else {
+            print("NetPulse: Launch at Login requires macOS 13 or later.")
+            return
+        }
+
+        do {
+            if enabled {
+                if SMAppService.mainApp.status != .enabled {
+                    try SMAppService.mainApp.register()
+                }
+            } else {
+                if SMAppService.mainApp.status == .enabled {
+                    try SMAppService.mainApp.unregister()
+                }
+            }
+        } catch {
+            print("NetPulse: failed to update login item — \(error.localizedDescription)")
         }
     }
 

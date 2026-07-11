@@ -1,11 +1,7 @@
 // MainWindowView.swift
 // NetPulse
 // Full main window — shown when user opens the app from Dock / Spotlight.
-// Displays live speed, session stats, and speed test in an Apple-style card layout.
-// MainWindowView.swift
-// NetPulse
-// Full main window — shown when user opens the app from Dock / Spotlight.
-// Displays live speed, session stats, and speed test in an Apple-style card layout.
+// Displays live speed, session stats, speed test, and settings in an Apple-style card layout.
 
 import SwiftUI
 
@@ -15,9 +11,10 @@ struct MainWindowView: View {
     @State private var selectedTab: Tab = .live
 
     enum Tab: String, CaseIterable {
-        case live   = "Live"
-        case test   = "Speed Test"
-        case about  = "About"
+        case live     = "Live"
+        case test     = "Speed Test"
+        case settings = "Settings"
+        case about    = "About"
     }
 
     var body: some View {
@@ -54,16 +51,17 @@ struct MainWindowView: View {
             // ── Tab Content ────────────────────────────────────────
             Group {
                 switch selectedTab {
-                case .live:   LiveTab()
-                case .test:   SpeedTestTab()
-                case .about:  AboutTab()
+                case .live:     LiveTab()
+                case .test:     SpeedTestTab()
+                case .settings: SettingsTab()
+                case .about:    AboutTab()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .environmentObject(monitor)
 
         }
-        .frame(width: 460, height: 500)
+        .frame(width: 460, height: 540)
         .background(Color(NSColor.windowBackgroundColor))
     }
 }
@@ -192,6 +190,70 @@ private struct SpeedTestTab: View {
             .padding(.horizontal)
         }
         .padding(24)
+    }
+}
+
+// MARK: - Settings Tab
+
+private struct SettingsTab: View {
+    @EnvironmentObject var monitor: NetworkSpeedMonitor
+
+    var body: some View {
+        VStack(spacing: 20) {
+
+            GroupBox(label: Label("App Behavior", systemImage: "gearshape.fill").font(.subheadline)) {
+                VStack(spacing: 16) {
+                    SettingsRow(
+                        title: "Show in Dock",
+                        subtitle: "When off, NetPulse lives only in the menu bar.",
+                        isOn: $monitor.showDockIcon
+                    )
+
+                    Divider()
+
+                    SettingsRow(
+                        title: "Launch at Login",
+                        subtitle: "Start NetPulse automatically when you log in.",
+                        isOn: $monitor.launchAtLogin
+                    )
+                }
+                .padding(.top, 6)
+                .padding(.horizontal, 4)
+            }
+
+            Spacer()
+
+            Button(role: .destructive) {
+                NSApplication.shared.terminate(nil)
+            } label: {
+                Label("Quit NetPulse", systemImage: "power")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+        .padding(24)
+    }
+}
+
+private struct SettingsRow: View {
+    let title: String
+    let subtitle: String
+    @Binding var isOn: Bool
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.body)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: $isOn)
+                .toggleStyle(.switch)
+                .labelsHidden()
+        }
     }
 }
 

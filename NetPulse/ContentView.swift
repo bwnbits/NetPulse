@@ -2,9 +2,10 @@
 // NetPulse
 //
 // Menu-bar popover panel.
-// Shows: live speed (prominent) → session totals → speed test results → controls.
+// Shows: live speed (prominent) → session totals → speed test results → controls → settings.
 
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
 
@@ -149,6 +150,45 @@ struct ContentView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+
+            Divider()
+
+            // ── Settings ─────────────────────────────────────────────
+            VStack(spacing: 8) {
+                Text("Settings")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                Toggle(isOn: $monitor.showDockIcon) {
+                    Text("Show in Dock")
+                        .font(.caption)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+
+                Toggle(isOn: $monitor.launchAtLogin) {
+                    Text("Launch at Login")
+                        .font(.caption)
+                }
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            HStack {
+                Spacer()
+                Button("Quit NetPulse") {
+                    NSApplication.shared.terminate(nil)
+                }
+                .buttonStyle(.borderless)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+                Spacer()
+            }
+            .padding(.bottom, 10)
         }
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))

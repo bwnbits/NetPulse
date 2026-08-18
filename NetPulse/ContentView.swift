@@ -1,8 +1,9 @@
-// ContentView.swift
-// NetPulse
+//  ContentView.swift
+//  NetPulse
 //
-// Menu-bar popover panel.
-// Shows: live speed (prominent) → session totals → speed test results → controls → settings.
+//  Menu-bar popover panel.
+//  Shows: live speed → session totals → optional thermal → optional speed test → controls → settings.
+//
 
 import SwiftUI
 import AppKit
@@ -11,21 +12,45 @@ struct ContentView: View {
 
     @EnvironmentObject var monitor: NetworkSpeedMonitor
 
+    // ── Thermal monitor ───────────────────────────────────────────
+    @StateObject private var thermalMonitor = ThermalMonitor()
+
+    // ── User preferences ─────────────────────────────────────────
+    @AppStorage("showMacThermal")
+    private var showMacThermal = true
+
+    @AppStorage("showSpeedTest")
+    private var showSpeedTest = true
+
+    // Settings starts collapsed every time the popover opens.
+    @State private var showSettings = false
+
     var body: some View {
         VStack(spacing: 0) {
 
-            // ── Header ──────────────────────────────────────────────
+            // ── Header ─────────────────────────────────────────────
             HStack {
                 Label("NetPulse", systemImage: "bolt.fill")
                     .font(.headline)
                     .foregroundColor(.primary)
+
                 Spacer()
+
                 Circle()
-                    .fill(monitor.isMonitoring ? Color.green : Color.gray)
+                    .fill(
+                        monitor.isMonitoring
+                        ? Color.green
+                        : Color.gray
+                    )
                     .frame(width: 8, height: 8)
-                Text(monitor.isMonitoring ? "Live" : "Paused")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
+
+                Text(
+                    monitor.isMonitoring
+                    ? "Live"
+                    : "Paused"
+                )
+                .font(.caption2)
+                .foregroundColor(.secondary)
             }
             .padding(.horizontal, 16)
             .padding(.top, 14)
@@ -33,25 +58,35 @@ struct ContentView: View {
 
             Divider()
 
-            // ── Live Speed ───────────────────────────────────────────
+            // ── Live Speed ─────────────────────────────────────────
             VStack(spacing: 4) {
+
                 Text("Live Network Speed")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(
+                        maxWidth: .infinity,
+                        alignment: .leading
+                    )
 
                 HStack(spacing: 16) {
+
                     SpeedTile(
                         label: "Download",
                         icon: "arrow.down.circle.fill",
                         iconColor: .green,
-                        value: monitor.formatSpeed(monitor.downloadSpeed)
+                        value: monitor.formatSpeed(
+                            monitor.downloadSpeed
+                        )
                     )
+
                     SpeedTile(
                         label: "Upload",
                         icon: "arrow.up.circle.fill",
                         iconColor: .blue,
-                        value: monitor.formatSpeed(monitor.uploadSpeed)
+                        value: monitor.formatSpeed(
+                            monitor.uploadSpeed
+                        )
                     )
                 }
             }
@@ -60,79 +95,242 @@ struct ContentView: View {
 
             Divider()
 
-            // ── Session Totals ───────────────────────────────────────
+            // ── Session Totals ─────────────────────────────────────
             VStack(spacing: 4) {
+
                 Text("Session Totals")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(
+                        maxWidth: .infinity,
+                        alignment: .leading
+                    )
 
                 HStack {
-                    StatRow(label: "Downloaded", value: monitor.formatData(monitor.totalDownload), color: .green)
+
+                    StatRow(
+                        label: "Downloaded",
+                        value: monitor.formatData(
+                            monitor.totalDownload
+                        ),
+                        color: .green
+                    )
+
                     Spacer()
-                    StatRow(label: "Uploaded",   value: monitor.formatData(monitor.totalUpload),   color: .blue)
+
+                    StatRow(
+                        label: "Uploaded",
+                        value: monitor.formatData(
+                            monitor.totalUpload
+                        ),
+                        color: .blue
+                    )
+
                     Spacer()
-                    StatRow(label: "Interface",  value: monitor.networkType, color: .orange)
+
+                    StatRow(
+                        label: "Interface",
+                        value: monitor.networkType,
+                        color: .orange
+                    )
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
 
-            Divider()
+            // ── Optional Mac Thermal ───────────────────────────────
+            if showMacThermal {
 
-            // ── Speed Test ───────────────────────────────────────────
-            VStack(spacing: 8) {
-                Text("Speed Test")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Divider()
 
-                if monitor.isTestingSpeed {
-                    HStack(spacing: 8) {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .scaleEffect(0.7)
-                        Text("Running test, please wait…")
+                VStack(spacing: 6) {
+
+                    Text("Mac Thermal")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: .leading
+                        )
+
+                    HStack(spacing: 10) {
+
+                        Image(
+                            systemName: thermalMonitor.icon
+                        )
+                        .font(.title3)
+                        .foregroundColor(
+                            thermalMonitor.color
+                        )
+
+                        VStack(
+                            alignment: .leading,
+                            spacing: 1
+                        ) {
+
+                            Text(
+                                thermalMonitor.statusText
+                            )
+                            .font(
+                                .system(
+                                    size: 13,
+                                    weight: .semibold
+                                )
+                            )
+                            .foregroundColor(.primary)
+
+                            Text(
+                                "System thermal pressure"
+                            )
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        Circle()
+                            .fill(
+                                thermalMonitor.color
+                            )
+                            .frame(
+                                width: 9,
+                                height: 9
+                            )
+                    }
+                    .padding(10)
+                    .background(
+                        Color.primary.opacity(0.05)
+                    )
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: 8,
+                            style: .continuous
+                        )
+                    )
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+            }
+
+            // ── Optional Speed Test ────────────────────────────────
+            if showSpeedTest {
+
+                Divider()
+
+                VStack(spacing: 8) {
+
+                    Text("Speed Test")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: .leading
+                        )
+
+                    if monitor.isTestingSpeed {
+
+                        HStack(spacing: 8) {
+
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .scaleEffect(0.7)
+
+                            Text(
+                                "Running test, please wait…"
+                            )
                             .font(.caption)
                             .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    HStack(spacing: 16) {
-                        TestResultTile(label: "↓ DL", value: monitor.testDownloadMbps)
-                        TestResultTile(label: "↑ UL", value: monitor.testUploadMbps)
-                        VStack(spacing: 2) {
-                            Text("Ping")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Text(monitor.testPingMs > 0 ? "\(monitor.testPingMs) ms" : "—")
-                                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                                .foregroundColor(pingColor(monitor.testPingMs))
                         }
-                        .frame(maxWidth: .infinity)
-                    }
-                }
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: .leading
+                        )
 
-                Button(action: { monitor.runSpeedTest() }) {
-                    Label(
-                        monitor.isTestingSpeed ? "Testing…" : "Run Speed Test",
-                        systemImage: "speedometer"
+                    } else {
+
+                        HStack(spacing: 16) {
+
+                            TestResultTile(
+                                label: "↓ DL",
+                                value:
+                                    monitor.testDownloadMbps
+                            )
+
+                            TestResultTile(
+                                label: "↑ UL",
+                                value:
+                                    monitor.testUploadMbps
+                            )
+
+                            VStack(spacing: 2) {
+
+                                Text("Ping")
+                                    .font(.caption2)
+                                    .foregroundColor(
+                                        .secondary
+                                    )
+
+                                Text(
+                                    monitor.testPingMs > 0
+                                    ? "\(monitor.testPingMs) ms"
+                                    : "—"
+                                )
+                                .font(
+                                    .system(
+                                        size: 13,
+                                        weight: .semibold,
+                                        design: .monospaced
+                                    )
+                                )
+                                .foregroundColor(
+                                    pingColor(
+                                        monitor.testPingMs
+                                    )
+                                )
+                            }
+                            .frame(
+                                maxWidth: .infinity
+                            )
+                        }
+                    }
+
+                    Button(
+                        action: {
+                            monitor.runSpeedTest()
+                        }
+                    ) {
+
+                        Label(
+                            monitor.isTestingSpeed
+                            ? "Testing…"
+                            : "Run Speed Test",
+                            systemImage: "speedometer"
+                        )
+                        .frame(
+                            maxWidth: .infinity
+                        )
+                    }
+                    .buttonStyle(
+                        .borderedProminent
                     )
-                    .frame(maxWidth: .infinity)
+                    .controlSize(.regular)
+                    .disabled(
+                        monitor.isTestingSpeed
+                    )
+                    .tint(.accentColor)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .disabled(monitor.isTestingSpeed)
-                .tint(.accentColor)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
 
             Divider()
 
-            // ── Controls ─────────────────────────────────────────────
+            // ── Controls ───────────────────────────────────────────
             HStack {
-                Toggle(isOn: $monitor.isMonitoring) {
+
+                Toggle(
+                    isOn: $monitor.isMonitoring
+                ) {
                     Text("Monitor")
                         .font(.caption)
                 }
@@ -153,115 +351,226 @@ struct ContentView: View {
 
             Divider()
 
-            // ── Settings ─────────────────────────────────────────────
-            VStack(spacing: 8) {
-                Text("Settings")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            // ── Collapsible Settings ───────────────────────────────
+            DisclosureGroup(
+                isExpanded: $showSettings
+            ) {
 
-                Toggle(isOn: $monitor.showDockIcon) {
-                    Text("Show in Dock")
-                        .font(.caption)
-                }
-                .toggleStyle(.switch)
-                .controlSize(.mini)
+                VStack(spacing: 8) {
 
-                Toggle(isOn: $monitor.launchAtLogin) {
-                    Text("Launch at Login")
-                        .font(.caption)
+                    Toggle(
+                        isOn: $monitor.showDockIcon
+                    ) {
+                        Text("Show in Dock")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+
+                    Toggle(
+                        isOn: $monitor.launchAtLogin
+                    ) {
+                        Text("Launch at Login")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+
+                    Toggle(
+                        isOn: $showMacThermal
+                    ) {
+                        Text("Show Mac Thermal")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+
+                    Toggle(
+                        isOn: $showSpeedTest
+                    ) {
+                        Text("Show Speed Test")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
                 }
-                .toggleStyle(.switch)
-                .controlSize(.mini)
+                .padding(.top, 6)
+
+            } label: {
+
+                Label(
+                    "Settings",
+                    systemImage: "gearshape"
+                )
+                .font(.caption)
+                .foregroundColor(.secondary)
             }
             .padding(.horizontal, 16)
-            .padding(.top, 10)
-            .padding(.bottom, 6)
+            .padding(.vertical, 8)
 
+            // ── Quit ───────────────────────────────────────────────
             HStack {
+
                 Spacer()
+
                 Button("Quit NetPulse") {
-                    NSApplication.shared.terminate(nil)
+                    NSApplication.shared
+                        .terminate(nil)
                 }
                 .buttonStyle(.borderless)
                 .font(.caption2)
                 .foregroundColor(.secondary)
+
                 Spacer()
             }
             .padding(.bottom, 10)
         }
         .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: 12,
+                style: .continuous
+            )
+        )
     }
 
+    // MARK: - Ping Color
+
     private func pingColor(_ ms: Int) -> Color {
-        if ms == 0    { return .secondary }
-        if ms < 50    { return .green }
-        if ms < 150   { return .orange }
+
+        if ms == 0 {
+            return .secondary
+        }
+
+        if ms < 50 {
+            return .green
+        }
+
+        if ms < 150 {
+            return .orange
+        }
+
         return .red
     }
 }
 
-// MARK: - Sub-components
+
+// MARK: - Speed Tile
 
 private struct SpeedTile: View {
-    let label:     String
-    let icon:      String
+
+    let label: String
+    let icon: String
     let iconColor: Color
-    let value:     String
+    let value: String
 
     var body: some View {
+
         HStack(spacing: 8) {
+
             Image(systemName: icon)
                 .foregroundColor(iconColor)
                 .font(.title2)
-            VStack(alignment: .leading, spacing: 1) {
+
+            VStack(
+                alignment: .leading,
+                spacing: 1
+            ) {
+
                 Text(label)
                     .font(.caption2)
                     .foregroundColor(.secondary)
+
                 Text(value)
-                    .font(.system(size: 15, weight: .bold, design: .monospaced))
+                    .font(
+                        .system(
+                            size: 15,
+                            weight: .bold,
+                            design: .monospaced
+                        )
+                    )
                     .foregroundColor(.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(
+            maxWidth: .infinity,
+            alignment: .leading
+        )
         .padding(10)
-        .background(Color.primary.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(
+            Color.primary.opacity(0.05)
+        )
+        .clipShape(
+            RoundedRectangle(
+                cornerRadius: 8,
+                style: .continuous
+            )
+        )
     }
 }
 
+
+// MARK: - Stat Row
+
 private struct StatRow: View {
+
     let label: String
     let value: String
     let color: Color
 
     var body: some View {
+
         VStack(spacing: 2) {
+
             Text(label)
                 .font(.caption2)
                 .foregroundColor(.secondary)
+
             Text(value)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(
+                    .system(
+                        size: 12,
+                        weight: .semibold,
+                        design: .monospaced
+                    )
+                )
                 .foregroundColor(color)
         }
     }
 }
 
+
+// MARK: - Test Result Tile
+
 private struct TestResultTile: View {
+
     let label: String
     let value: Double
 
     var body: some View {
+
         VStack(spacing: 2) {
+
             Text(label)
                 .font(.caption2)
                 .foregroundColor(.secondary)
-            Text(value > 0 ? String(format: "%.1f", value) : "—")
-                .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                .foregroundColor(.primary)
+
+            Text(
+                value > 0
+                ? String(format: "%.1f", value)
+                : "—"
+            )
+            .font(
+                .system(
+                    size: 13,
+                    weight: .semibold,
+                    design: .monospaced
+                )
+            )
+            .foregroundColor(.primary)
+
             Text("Mbps")
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)

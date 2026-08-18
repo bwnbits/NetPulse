@@ -1,7 +1,10 @@
-// NetPulseApp.swift
-// NetPulse
 //
-// Single source of truth: monitor created once here and injected everywhere.
+//  NetPulseApp.swift
+//  NetPulse
+//
+//  Single source of truth: monitor created once here
+//  and injected everywhere.
+//
 
 import SwiftUI
 
@@ -12,7 +15,9 @@ struct NetPulseApp: App {
 
     var body: some Scene {
 
-        // Main window (optional — can be hidden if pure menu-bar app)
+        // ── Main Window ───────────────────────────────────────────
+        // Optional — can be hidden if NetPulse is used purely
+        // as a menu-bar application.
         WindowGroup {
             MainWindowView()
                 .environmentObject(monitor)
@@ -20,7 +25,7 @@ struct NetPulseApp: App {
         .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
 
-        // Menu bar
+        // ── Menu Bar ──────────────────────────────────────────────
         MenuBarExtra {
             ContentView()
                 .environmentObject(monitor)

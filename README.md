@@ -10,7 +10,8 @@ A lightweight, native macOS menu-bar app that shows your real-time network speed
 
 - 📊 **Live speed** in the menu bar — download & upload, updated every second
 - 📈 **Session totals** — cumulative data used, persisted across restarts
-- 🌐 **Interface detection** — automatically shows Wi-Fi / Ethernet / VPN
+- 🌐 **Interface Detection** — automatically detects Wi-Fi, Ethernet, VPN, and other active interfaces
+🌡️ **Thermal Monitoring** — monitor your Mac's thermal information alongside network activity
 - 🚀 **Built-in speed test** — real download/upload/ping test using parallel streams
 - 🕶️ **Menu-bar only mode** — hide the Dock icon entirely, live purely in your menu bar
 - 🔓 **Launch at Login** — starts automatically, no manual relaunching
@@ -19,6 +20,9 @@ A lightweight, native macOS menu-bar app that shows your real-time network speed
 ## Screenshots
 
 <!-- Add 1–2 screenshots of the menu bar popover + main window here -->
+![Uploading Screenshot 2026-08-18 at 17.49.35.png…]()
+![Uploading Screenshot 2026-08-18 at 17.50.36.png…]()
+
 
 ## Installation
 

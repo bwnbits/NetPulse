@@ -40,8 +40,6 @@ No fake numbers. No bloat. No data drain.
 <img src="assets/screenshot-speedtest.png" width="45%" alt="NetPulse speed test view">
 </div>
 
-> 💡 Drop your screenshots into an `assets/` folder in the repo and update the paths above — GitHub's "uploading" links don't render once the upload session ends.
-
 ---
 
 ## 📦 Installation

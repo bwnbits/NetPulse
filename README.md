@@ -103,7 +103,17 @@ Issues and pull requests are welcome! For larger changes, please open an issue f
 MIT License — see [LICENSE](LICENSE) for details.
 
 ---
+## ⌲ Install via Homebrew Tap
 
+Install NetPulse quickly using Homebrew:
+
+```bash
+
+brew tap bwnbits/netpulse
+brew install --cask netpulse
+
+```
+---
 <div align="center">
 
 Made with ❤️ in India by [**bwnbits**](https://github.com/bwnbits)
